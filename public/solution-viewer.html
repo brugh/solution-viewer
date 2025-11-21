@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Power Automate Solution Viewer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+
+    #controls {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    #fileInput {
+      padding: 8px;
+      border: 2px solid #0078d4;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    #flowName {
+      font-size: 18px;
+      font-weight: 600;
+      color: #333;
+      margin-left: 20px;
+    }
+
+    #canvas {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      position: relative;
+      overflow: auto;
+      min-height: 600px;
+    }
+
+    svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .node {
+      position: absolute;
+      background: white;
+      border: 2px solid #0078d4;
+      border-radius: 8px;
+      padding: 12px 16px;
+      min-width: 180px;
+      max-width: 280px;
+      cursor: move;
+      user-select: none;
+      z-index: 10;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      transition: box-shadow 0.2s;
+    }
+
+    .node:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    }
+
+    .node.dragging {
+      opacity: 0.7;
+      cursor: grabbing;
+    }
+
+    .node-trigger {
+      border-color: #107c10;
+      background: #f0fff0;
+    }
+
+    .node-action {
+      border-color: #0078d4;
+      background: #f0f8ff;
+    }
+
+    .node-condition {
+      border-color: #d83b01;
+      background: #fff8f0;
+    }
+
+    .node-foreach, .node-until {
+      border-color: #8764b8;
+      background: #f8f0ff;
+    }
+
+    .node-header {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 6px;
+      color: #333;
+      word-wrap: break-word;
+    }
+
+    .node-type {
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .node-details {
+      font-size: 11px;
+      color: #888;
+      margin-top: 6px;
+      border-top: 1px solid #e0e0e0;
+      padding-top: 6px;
+    }
+
+    .branch-container {
+      border: 2px dashed #d83b01;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 10px 0;
+      background: rgba(216, 59, 1, 0.03);
+      position: absolute;
+    }
+
+    .branch-label {
+      position: absolute;
+      top: -12px;
+      left: 10px;
+      background: white;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #d83b01;
+      border-radius: 4px;
+    }
+
+    line, path {
+      stroke: #666;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .arrow {
+      fill: #666;
+    }
+
+    .error {
+      color: #d83b01;
+      padding: 20px;
+      background: #fff8f0;
+      border: 2px solid #d83b01;
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls" style="position:fixed; top:0; left:0; right:0; background:#fff; padding:10px; z-index:1000; border-bottom:1px solid #ddd; display:flex; gap:10px; align-items:center;">
+    <input type="file" id="fileInput" accept=".zip,.json">
+    <select id="flowSelector" style="display:none; padding: 8px;">
+      <option value="">Select a flow...</option>
+    </select>
+    <button id="clearBtn" style="display:none; padding:8px; background:#d83b01; color:white; border:none; border-radius:4px; cursor:pointer;">Clear Cache</button>
+    <button id="savePositions" style="display:none; padding:8px;">Save Layout</button>
+    <button id="restorePositions" style="display:none; padding:8px;">Restore Layout</button>
+    <input type="file" id="restoreFile" accept="application/json" style="display:none">
+    <span id="flowName" style="margin-left:auto;"></span>
+  </div>
+
+  <div id="canvas" style="margin-top:70px;"></div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const fileInput = document.getElementById('fileInput');
+    const flowNameEl = document.getElementById('flowName');
+    const flowSelector = document.getElementById('flowSelector');
+    const clearBtn = document.getElementById('clearBtn');
+    const saveBtn = document.getElementById('savePositions');
+    const restoreBtn = document.getElementById('restorePositions');
+    const restoreFileInput = document.getElementById('restoreFile');
+
+    let flowData = null;
+    let nodes = [];
+    let edges = [];
+    let draggedNode = null;
+    let offsetX = 0;
+    let offsetY = 0;
+    let db = null;
+    let currentSolution = null;
+    let dbInitPromise = null;
+    const LAST_SOLUTION_KEY = 'flow_viewer_last_solution';
+    const LAST_FLOW_KEY = 'flow_viewer_last_flow';
+
+    // Layout constants
+    const NODE_WIDTH = 200;
+    const NODE_HEIGHT = 80;
+    const VERTICAL_SPACING = 120;
+    const HORIZONTAL_SPACING = 300;
+    const START_X = 100;
+    const START_Y = 50;
+
+    const nodePositions = new Map();
+    let currentFlowId = null;
+
+    function getCurrentFlowKey() {
+      return currentFlowId ||
+        flowData?.properties?.name ||
+        flowData?.properties?.displayName ||
+        flowData?.name ||
+        flowData?.properties?.definition?.metadata?.flowDisplayName ||
+        'flow';
+    }
+
+    function getLayoutStorageKey() {
+      return `flow_layout_${getCurrentFlowKey()}`;
+    }
+
+    function serializeCurrentLayout() {
+      const payload = {};
+      nodePositions.forEach((pos, nodeId) => {
+        payload[nodeId] = pos;
+      });
+      return payload;
+    }
+
+    function saveLayoutSnapshot(snapshot = null) {
+      const key = getLayoutStorageKey();
+      const payload = snapshot || serializeCurrentLayout();
+      try {
+        localStorage.setItem(key, JSON.stringify(payload));
+      } catch (err) {
+        console.warn('Failed to save layout', err);
+      }
+    }
+
+    function loadLayoutSnapshot() {
+      const key = getLayoutStorageKey();
+      const stored = localStorage.getItem(key);
+      if (!stored) return null;
+      try {
+        return JSON.parse(stored);
+      } catch (err) {
+        console.warn('Failed to parse saved layout', err);
+        return null;
+      }
+    }
+
+    function applySnapshotToNodes(snapshot) {
+      if (!snapshot) return false;
+      let applied = false;
+      nodes.forEach(node => {
+        const saved = snapshot[node.id];
+        if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
+          node.x = saved.x;
+          node.y = saved.y;
+          nodePositions.set(node.id, { x: saved.x, y: saved.y });
+          applied = true;
+        } else if (!nodePositions.has(node.id)) {
+          nodePositions.set(node.id, { x: node.x, y: node.y });
+        }
+      });
+      return applied;
+    }
+
+    function downloadLayoutSnapshot() {
+      const snapshot = serializeCurrentLayout();
+      const data = JSON.stringify(snapshot, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const flowKey = getCurrentFlowKey().replace(/[^a-z0-9_-]+/gi, '_');
+      link.href = url;
+      link.download = `${flowKey || 'flow'}-layout.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+
+    function importLayoutSnapshot(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const snapshot = JSON.parse(reader.result);
+          applySnapshotToNodes(snapshot);
+          saveLayoutSnapshot(snapshot);
+          applyNodePositionsToDOM();
+        } catch (err) {
+          alert('Invalid layout file');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // IndexedDB setup
+    function initDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open('PowerAutomateSolutions', 1);
+        
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          db = request.result;
+          resolve(db);
+        };
+        
+        request.onupgradeneeded = (e) => {
+          const database = e.target.result;
+          if (!database.objectStoreNames.contains('solutions')) {
+            database.createObjectStore('solutions', { keyPath: 'id' });
+          }
+          if (!database.objectStoreNames.contains('flows')) {
+            const flowStore = database.createObjectStore('flows', { keyPath: 'id' });
+            flowStore.createIndex('solutionId', 'solutionId', { unique: false });
+          }
+        };
+      });
+    }
+
+    function ensureDB() {
+      if (db) return Promise.resolve(db);
+      if (!dbInitPromise) {
+        dbInitPromise = initDB();
+      }
+      return dbInitPromise;
+    }
+
+    function deriveSolutionId(sourceName) {
+      if (!sourceName) return 'solution_default';
+      return sourceName
+        .replace(/\.zip$/i, '')
+        .replace(/[^a-zA-Z0-9_-]+/g, '_')
+        .toLowerCase();
+    }
+
+    function saveSolution(solutionId, solutionName, flows) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(['solutions', 'flows'], 'readwrite');
+        
+        tx.objectStore('solutions').put({
+          id: solutionId,
+          name: solutionName,
+          timestamp: Date.now()
+        });
+
+        const flowStore = tx.objectStore('flows');
+        flows.forEach(flow => {
+          flowStore.put({
+            id: `${solutionId}_${flow.id}`,
+            solutionId,
+            name: flow.name,
+            data: flow.data
+          });
+        });
+
+        tx.oncomplete = () => resolve(solutionId);
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    function loadSolutions() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('solutions', 'readonly');
+        const request = tx.objectStore('solutions').getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function loadFlowsBySolution(solutionId) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('flows', 'readonly');
+        const index = tx.objectStore('flows').index('solutionId');
+        const request = index.getAll(solutionId);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function clearCache() {
+      const tx = db.transaction(['solutions', 'flows'], 'readwrite');
+      await tx.objectStore('solutions').clear();
+      await tx.objectStore('flows').clear();
+      flowSelector.style.display = 'none';
+      clearBtn.style.display = 'none';
+      saveBtn.style.display = 'none';
+      restoreBtn.style.display = 'none';
+      flowSelector.innerHTML = '<option value="">Select a flow...</option>';
+      canvas.innerHTML = '';
+      flowNameEl.textContent = '';
+      currentFlowId = null;
+      flowData = null;
+      nodes = [];
+      edges = [];
+      nodePositions.clear();
+      flowSelector.value = '';
+      fileInput.value = '';
+      localStorage.removeItem(LAST_SOLUTION_KEY);
+      localStorage.removeItem(LAST_FLOW_KEY);
+
+      // Remove any saved layout snapshots
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('flow_layout_')) {
+          localStorage.removeItem(key);
+        }
+      });
+    }
+
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      await ensureDB();
+      if (file.name.endsWith('.zip')) {
+        await handleZipFile(file);
+      } else if (file.name.endsWith('.json')) {
+        const text = await file.text();
+        flowData = JSON.parse(text);
+        currentFlowId = flowData?.properties?.name || flowData?.name || file.name;
+        nodePositions.clear();
+        renderFlow();
+      }
+    });
+
+    async function handleZipFile(file) {
+      const zip = await JSZip.loadAsync(file);
+      const flows = [];
+      
+      // Try Power Platform solution structure (Workflows/*.json)
+      let flowFiles = Object.keys(zip.files).filter(path => {
+        const parts = path.split('/');
+        return parts.length === 2 && parts[0] === 'Workflows' && path.endsWith('.json');
+      });
+
+      // Fallback to old structure (Microsoft.Flow/flows/*/definition.json)
+      if (flowFiles.length === 0) {
+        flowFiles = Object.keys(zip.files).filter(path => 
+          path.includes('Microsoft.Flow/flows/') && path.endsWith('definition.json')
+        );
+      }
+
+      for (const filePath of flowFiles) {
+        try {
+          const content = await zip.files[filePath].async('text');
+          const flowDef = JSON.parse(content);
+          
+          // Validate flow has required structure
+          if (!flowDef.properties?.definition) {
+            console.warn(`Skipping ${filePath}: missing properties.definition`);
+            continue;
+          }
+          
+          // Extract flow ID from filename or path
+          const fileName = filePath.split('/').pop().replace('.json', '');
+          const flowId = fileName.match(/[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}/i)?.[0] || 
+                         filePath.split('/').find(part => 
+                           part.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+                         ) || 
+                         `flow_${flows.length}`;
+          
+          // Extract display name from filename (before the GUID)
+          const displayName = fileName.split('-').slice(0, -5).join('-') || 
+                             flowDef.properties?.displayName || 
+                             `Flow ${flows.length + 1}`;
+          
+          flows.push({
+            id: flowId,
+            name: displayName,
+            data: flowDef
+          });
+        } catch (err) {
+          console.error(`Error processing ${filePath}:`, err);
+        }
+      }
+
+      if (flows.length === 0) {
+        canvas.innerHTML = '<div class="error">No flows found in solution ZIP</div>';
+        const solutions = await loadSolutions();
+        if (solutions.length > 0) {
+          const storedSolutionId = localStorage.getItem(LAST_SOLUTION_KEY);
+          const lastSolution = storedSolutionId && solutions.find(s => s.id === storedSolutionId)
+            ? solutions.find(s => s.id === storedSolutionId)
+            : solutions[solutions.length - 1];
+          currentSolution = lastSolution.id;
+          localStorage.setItem(LAST_SOLUTION_KEY, currentSolution);
+          const flows = await loadFlowsBySolution(lastSolution.id);
+
+          // Populate selector
+          flowSelector.innerHTML = '<option value="">Select a flow...</option>';
+          flows.forEach(flow => {
+            const option = document.createElement('option');
+            option.value = flow.id;
+            option.textContent = flow.name;
+            flowSelector.appendChild(option);
+          });
+
+          flowSelector.style.display = 'inline-block';
+          clearBtn.style.display = 'inline-block';
+          saveBtn.style.display = 'inline-block';
+          restoreBtn.style.display = 'inline-block';
+          canvas.innerHTML = `<div style="padding: 20px; color: #666;">Loaded cached solution: ${lastSolution.name}<br>Select a flow to visualize</div>`;
+
+          const lastFlow = localStorage.getItem(LAST_FLOW_KEY);
+          if (lastFlow && flows.find(f => f.id === lastFlow)) {
+            flowSelector.value = lastFlow;
+            flowSelector.dispatchEvent(new Event('change'));
+          }
+        }
+      } else {
+        // Save to IndexedDB with deterministic ID
+        const solutionId = deriveSolutionId(file.name);
+        const savedSolutionId = await saveSolution(solutionId, file.name.replace(/\.zip$/i, '') || solutionId, flows);
+        currentSolution = savedSolutionId;
+        localStorage.setItem(LAST_SOLUTION_KEY, savedSolutionId);
+
+        // Populate selector
+        flowSelector.innerHTML = '<option value="">Select a flow...</option>';
+        flows.forEach((flow, idx) => {
+          const option = document.createElement('option');
+          option.value = `${savedSolutionId}_${flow.id}`;
+          option.textContent = flow.name;
+          flowSelector.appendChild(option);
+        });
+
+        flowSelector.style.display = 'inline-block';
+        clearBtn.style.display = 'inline-block';
+        saveBtn.style.display = 'inline-block';
+        restoreBtn.style.display = 'inline-block';
+        canvas.innerHTML = '<div style="padding: 20px; color: #666;">Select a flow from the dropdown to visualize</div>';
+
+        // auto-select last flow if exists
+        const lastFlow = localStorage.getItem(LAST_FLOW_KEY);
+        if (lastFlow) {
+          flowSelector.value = lastFlow;
+          flowSelector.dispatchEvent(new Event('change'));
+        }
+      }
+    }
+
+    flowSelector.addEventListener('change', async (e) => {
+      const flowId = e.target.value;
+      if (!flowId) return;
+      currentFlowId = flowId;
+      nodePositions.clear();
+
+      await ensureDB();
+
+      const tx = db.transaction('flows', 'readonly');
+      const request = tx.objectStore('flows').get(flowId);
+
+      request.onsuccess = () => {
+        const flow = request.result;
+        if (flow && flow.data) {
+          flowData = flow.data;
+          localStorage.setItem(LAST_FLOW_KEY, flowId);
+          renderFlow();
+          saveBtn.style.display = 'inline-block';
+          restoreBtn.style.display = 'inline-block';
+        } else {
+          canvas.innerHTML = '<div class="error">Flow not found in cache</div>';
+        }
+      };
+
+      request.onerror = () => {
+        canvas.innerHTML = `<div class="error">Error loading flow: ${request.error}</div>`;
+      };
+    });
+
+    clearBtn.addEventListener('click', async () => {
+      if (confirm('Clear all cached solutions?')) {
+        await clearCache();
+      }
+    });
+
+    async function renderFlow() {
+      if (!flowData?.properties?.definition) {
+        canvas.innerHTML = `<div class="error">Invalid flow definition. Structure: ${JSON.stringify(Object.keys(flowData || {}))}</div>`;
+        return;
+      }
+
+      const def = flowData.properties.definition;
+      
+      // Extract display name from definition metadata or use a default
+      const displayName = def.metadata?.flowDisplayName || 
+                         flowData.properties?.displayName || 
+                         '<no displayname for flow>';
+      flowNameEl.textContent = displayName;
+
+      nodes = [];
+      edges = [];
+      canvas.innerHTML = '';
+
+      // Build complete graph structure first
+      const graph = buildFlowGraph(def);
+      
+      // Layout nodes in topological order
+      layoutGraph(graph);
+
+      // Populate position map
+      nodePositions.clear();
+      nodes.forEach(node => {
+        nodePositions.set(node.id, { x: node.x, y: node.y });
+      });
+
+      // Render to DOM
+      const savedSnapshot = loadLayoutSnapshot();
+      if (savedSnapshot) {
+        applySnapshotToNodes(savedSnapshot);
+      }
+
+      renderNodes();
+      drawConnections();
+
+      // Auto-size canvas
+      const maxX = Math.max(...nodes.map(n => n.x)) + 300;
+      const maxY = Math.max(...nodes.map(n => n.y)) + 200;
+      canvas.style.minHeight = `${maxY}px`;
+      canvas.style.minWidth = `${maxX}px`;
+    }
+
+    function buildFlowGraph(def) {
+      const graph = {
+        nodes: new Map(),
+        edges: [],
+        triggers: [],
+        rootActions: [],
+        containerChildren: new Map()
+      };
+
+      // Add triggers
+      Object.entries(def.triggers || {}).forEach(([name, trigger]) => {
+        graph.nodes.set(name, {
+          id: name,
+          label: name,
+          type: 'trigger',
+          actionType: trigger.type,
+          metadata: trigger.metadata,
+          details: trigger,
+          parents: [],
+          children: [],
+          level: 0
+        });
+        graph.triggers.push(name);
+      });
+
+      // Recursively add all actions (including nested)
+      function addActions(actionsObj, parentId = null, prefix = '', branch = null, level = 0) {
+        Object.entries(actionsObj).forEach(([name, action]) => {
+          const nodeId = prefix ? `${prefix}_${name}` : name;
+          if (graph.nodes.has(nodeId)) return;
+
+          graph.nodes.set(nodeId, {
+            id: nodeId,
+            label: name,
+            type: getNodeType(action.type),
+            actionType: action.type,
+            metadata: action.metadata,
+            details: action,
+            parents: [],
+            children: [],
+            parentContainer: parentId,
+            branch,
+            level
+          });
+
+          if (parentId) {
+            if (!graph.containerChildren.has(parentId)) {
+              graph.containerChildren.set(parentId, []);
+            }
+            graph.containerChildren.get(parentId).push(nodeId);
+          }
+
+          // runAfter edges
+          if (action.runAfter && Object.keys(action.runAfter).length > 0) {
+            Object.keys(action.runAfter).forEach(parent => {
+              const resolvedParent = prefix ? `${prefix}_${parent}` : parent;
+              graph.edges.push({ from: resolvedParent, to: nodeId });
+            });
+          } else if (parentId) {
+            graph.edges.push({ from: parentId, to: nodeId });
+          } else if (graph.triggers[0]) {
+            graph.edges.push({ from: graph.triggers[0], to: nodeId });
+          }
+
+          if (!prefix && (!action.runAfter || Object.keys(action.runAfter).length === 0)) {
+            graph.rootActions.push(nodeId);
+          }
+
+          if (action.type === 'If') {
+            if (action.actions) {
+              addActions(action.actions, nodeId, nodeId, 'then', level + 1);
+            }
+            if (action.else?.actions) {
+              addActions(action.else.actions, nodeId, nodeId, 'else', level + 1);
+            }
+          } else if (action.actions) {
+            addActions(action.actions, nodeId, nodeId, branch, level + 1);
+          }
+        });
+      }
+
+      addActions(def.actions || {});
+
+      redirectConditionEdges(graph);
+      redirectLoopEdges(graph);
+
+      // Rebuild parent/child relationships based on final edges
+      graph.nodes.forEach(node => {
+        node.parents = [];
+        node.children = [];
+      });
+
+      graph.edges.forEach(edge => {
+        const fromNode = graph.nodes.get(edge.from);
+        const toNode = graph.nodes.get(edge.to);
+        if (fromNode && toNode) {
+          fromNode.children.push(edge.to);
+          toNode.parents.push(edge.from);
+        }
+      });
+
+      return graph;
+    }
+
+    function getDescendantEndpoints(graph, rootId) {
+      const localNodes = new Set([rootId]);
+      const prefix = `${rootId}_`;
+      graph.nodes.forEach((_, nodeId) => {
+        if (nodeId.startsWith(prefix)) {
+          localNodes.add(nodeId);
+        }
+      });
+
+      const endpoints = [];
+      localNodes.forEach(nodeId => {
+        const node = graph.nodes.get(nodeId);
+        if (!node) return;
+        const hasChildInSet = node.children.some(childId => localNodes.has(childId));
+        if (!hasChildInSet) {
+          endpoints.push(nodeId);
+        }
+      });
+
+      return endpoints.length ? endpoints : [rootId];
+    }
+
+    function redirectConditionEdges(graph) {
+      const edgesToRemove = new Set();
+      const edgesToAdd = [];
+
+      graph.nodes.forEach(node => {
+        if (node.type !== 'condition') return;
+        const conditionId = node.id;
+        const branchNodeIds = new Set();
+        const children = graph.containerChildren.get(conditionId) || [];
+        const branchGroups = new Map(); // branch -> ordered nodes
+
+        children.forEach(childId => {
+          const childNode = graph.nodes.get(childId);
+          if (!childNode) return;
+          branchNodeIds.add(childId);
+          const branch = childNode.branch || 'default';
+          if (!branchGroups.has(branch)) branchGroups.set(branch, []);
+          branchGroups.get(branch).push(childId);
+        });
+
+        if (branchGroups.size === 0) return;
+
+        const branchEndpoints = [];
+        branchGroups.forEach(nodesInBranch => {
+          const lastRootId = nodesInBranch[nodesInBranch.length - 1];
+          if (!lastRootId) return;
+          getDescendantEndpoints(graph, lastRootId).forEach(id => branchEndpoints.push(id));
+        });
+
+        const targets = branchEndpoints.length ? branchEndpoints : [conditionId];
+        graph.nodes.forEach(candidate => {
+          if (candidate.id.startsWith(`${conditionId}_`)) {
+            branchNodeIds.add(candidate.id);
+          }
+        });
+
+        graph.edges.forEach((edge, idx) => {
+          if (edge.from === conditionId) {
+            if (branchNodeIds.has(edge.to)) return; // keep edges to branch children
+            edgesToRemove.add(idx);
+            targets.forEach(endpoint => {
+              edgesToAdd.push({ from: endpoint, to: edge.to });
+            });
+          }
+        });
+      });
+
+      Array.from(edgesToRemove).sort((a, b) => b - a).forEach(idx => graph.edges.splice(idx, 1));
+      graph.edges.push(...edgesToAdd);
+    }
+
+    function redirectLoopEdges(graph) {
+      const loopTypes = new Set(['foreach', 'until', 'scope', 'do until', 'dountil', 'do_until']);
+      const edgesToRemove = new Set();
+      const edgesToAdd = [];
+
+      graph.nodes.forEach(node => {
+        const type = node.actionType?.toLowerCase();
+        if (!loopTypes.has(type || '')) return;
+
+        const containerId = node.id;
+        const orderedChildren = graph.containerChildren.get(containerId) || [];
+        const lastChildId = orderedChildren[orderedChildren.length - 1];
+        if (!lastChildId) return;
+
+        const childIds = new Set();
+        graph.nodes.forEach(candidate => {
+          if (candidate.id.startsWith(`${containerId}_`)) {
+            childIds.add(candidate.id);
+          }
+        });
+
+        const targets = getDescendantEndpoints(graph, lastChildId);
+
+        graph.edges.forEach((edge, idx) => {
+          if (edge.from === containerId) {
+            if (childIds.has(edge.to)) return;
+            edgesToRemove.add(idx);
+            targets.forEach(endpoint => {
+              edgesToAdd.push({ from: endpoint, to: edge.to });
+            });
+          }
+        });
+      });
+
+      Array.from(edgesToRemove).sort((a, b) => b - a).forEach(idx => graph.edges.splice(idx, 1));
+      graph.edges.push(...edgesToAdd);
+    }
+
+    function layoutGraph(graph) {
+      const adjacency = new Map();
+      const indegree = new Map();
+
+      graph.nodes.forEach((_, nodeId) => {
+        adjacency.set(nodeId, []);
+        indegree.set(nodeId, 0);
+      });
+
+      graph.edges.forEach(edge => {
+        if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);
+        adjacency.get(edge.from).push(edge.to);
+        indegree.set(edge.to, (indegree.get(edge.to) || 0) + 1);
+      });
+
+      const queue = [];
+      indegree.forEach((deg, nodeId) => {
+        if (deg === 0) queue.push(nodeId);
+      });
+
+      queue.sort((a, b) => (graph.nodes.get(a)?.level ?? 0) - (graph.nodes.get(b)?.level ?? 0));
+
+      const nodePositionMap = new Map();
+      const levelBaseY = new Map();
+
+      const popNext = () => {
+        return queue.shift();
+      };
+
+      while (queue.length > 0) {
+        const nodeId = popNext();
+        const node = graph.nodes.get(nodeId);
+        if (!node) continue;
+
+        const nodeDepth = node.level ?? 0;
+        let x = START_X + nodeDepth * HORIZONTAL_SPACING;
+        const singleParent = node.parents.length === 1 ? node.parents[0] : null;
+        const parentNode = singleParent ? graph.nodes.get(singleParent) : null;
+        const parentPosition = singleParent ? nodePositionMap.get(singleParent) : null;
+        const isConditionBranchRoot = parentNode?.type === 'condition'
+          && node.parentContainer === singleParent
+          && (!node.details?.runAfter || Object.keys(node.details.runAfter).length === 0);
+
+        if (isConditionBranchRoot && parentPosition) {
+          x = parentPosition.x;
+          if (node.branch === 'then') {
+            x -= HORIZONTAL_SPACING / 2;
+          } else if (node.branch === 'else') {
+            x += HORIZONTAL_SPACING / 2;
+          }
+        } else {
+          if (node.branch === 'then') {
+            x -= HORIZONTAL_SPACING / 2;
+          } else if (node.branch === 'else') {
+            x += HORIZONTAL_SPACING / 2;
+          }
+        }
+
+        const parentPositions = node.parents
+          .map(parentId => nodePositionMap.get(parentId))
+          .filter(pos => pos);
+        const parentYs = parentPositions.map(pos => pos.y);
+
+        if (!isConditionBranchRoot && parentPositions.length === 1) {
+          x = parentPositions[0].x;
+        }
+
+        if (parentPositions.length > 1) {
+          const avgX = parentPositions.reduce((sum, pos) => sum + pos.x, 0) / parentPositions.length;
+          x = avgX;
+        }
+
+        let y;
+        if (parentYs.length === 0) {
+          const currentBase = levelBaseY.get(nodeDepth) ?? START_Y;
+          y = currentBase;
+          levelBaseY.set(nodeDepth, currentBase + VERTICAL_SPACING);
+        } else {
+          const maxParentY = Math.max(...parentYs);
+          y = maxParentY + VERTICAL_SPACING;
+        }
+
+        nodes.push({
+          id: node.id,
+          label: node.label,
+          type: node.type,
+          actionType: node.actionType,
+          x,
+          y,
+          metadata: node.metadata,
+          details: node.details,
+          branch: node.branch
+        });
+
+        nodePositionMap.set(nodeId, { x, y });
+
+        adjacency.get(nodeId)?.forEach(childId => {
+          indegree.set(childId, (indegree.get(childId) || 0) - 1);
+          if (indegree.get(childId) === 0) {
+            queue.push(childId);
+            queue.sort((a, b) => (graph.nodes.get(a)?.level ?? 0) - (graph.nodes.get(b)?.level ?? 0));
+          }
+        });
+      }
+
+      if (nodes.length > 0) {
+        const minX = Math.min(...nodes.map(node => node.x));
+        if (minX < 20) {
+          const shift = 20 - minX;
+          nodes.forEach(node => {
+            node.x += shift;
+          });
+          nodePositionMap.forEach(pos => {
+            pos.x += shift;
+          });
+        }
+      }
+
+      edges = graph.edges;
+    }
+
+    function getNodeType(actionType) {
+      const type = actionType?.toLowerCase() || '';
+      if (type === 'if') return 'condition';
+      if (type === 'foreach' || type === 'until') return type;
+      return 'action';
+    }
+
+    function renderNodes() {
+      nodes.forEach(node => {
+        const nodeEl = document.createElement('div');
+        nodeEl.className = `node node-${node.type}`;
+        nodeEl.style.left = `${node.x}px`;
+        nodeEl.style.top = `${node.y}px`;
+        nodeEl.dataset.id = node.id;
+
+        let detailsHtml = '';
+        if (node.actionType) {
+          detailsHtml = `<div class="node-details">Type: ${node.actionType}</div>`;
+        }
+
+        nodeEl.innerHTML = `
+          <div class="node-type">${node.type}</div>
+          <div class="node-header">${node.label}</div>
+          ${detailsHtml}
+        `;
+
+        nodeEl.addEventListener('mousedown', startDrag);
+        canvas.appendChild(nodeEl);
+      });
+    }
+
+    function drawConnections() {
+      // Remove old SVG
+      const oldSvg = canvas.querySelector('svg');
+      if (oldSvg) oldSvg.remove();
+
+      const maxX = Math.max(...nodes.map(n => n.x)) + 300;
+      const maxY = Math.max(...nodes.map(n => n.y)) + 200;
+
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width', maxX);
+      svg.setAttribute('height', maxY);
+
+      edges.forEach(edge => {
+        const fromNode = nodes.find(n => n.id === edge.from);
+        const toNode = nodes.find(n => n.id === edge.to);
+
+        if (!fromNode || !toNode) return;
+
+        const x1 = fromNode.x + NODE_WIDTH / 2;
+        const y1 = fromNode.y + NODE_HEIGHT;
+        const x2 = toNode.x + NODE_WIDTH / 2;
+        const y2 = toNode.y;
+
+        // Draw curved line (handle both vertical and horizontal connections)
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        
+        if (Math.abs(x1 - x2) < 50) {
+          // Vertical connection
+          const midY = (y1 + y2) / 2;
+          path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
+        } else {
+          // Horizontal or diagonal connection
+          const controlOffset = Math.min(Math.abs(y2 - y1) / 2, 60);
+          path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${y1 + controlOffset}, ${x2} ${y2 - controlOffset}, ${x2} ${y2}`);
+        }
+        
+        svg.appendChild(path);
+
+        // Arrow head
+        const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        arrow.setAttribute('points', `${x2},${y2} ${x2-5},${y2-8} ${x2+5},${y2-8}`);
+        arrow.setAttribute('class', 'arrow');
+        svg.appendChild(arrow);
+      });
+
+      canvas.insertBefore(svg, canvas.firstChild);
+    }
+
+    function startDrag(e) {
+      draggedNode = e.currentTarget;
+      draggedNode.classList.add('dragging');
+      
+      const rect = draggedNode.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+
+      document.addEventListener('mousemove', drag);
+      document.addEventListener('mouseup', stopDrag);
+    }
+
+    function drag(e) {
+      if (!draggedNode) return;
+
+      const canvasRect = canvas.getBoundingClientRect();
+      let x = e.clientX - canvasRect.left - offsetX + canvas.scrollLeft;
+      let y = e.clientY - canvasRect.top - offsetY + canvas.scrollTop;
+
+      x = Math.max(0, x);
+      y = Math.max(0, y);
+
+      draggedNode.style.left = `${x}px`;
+      draggedNode.style.top = `${y}px`;
+
+      // Update node position in data
+      const nodeId = draggedNode.dataset.id;
+      const node = nodes.find(n => n.id === nodeId);
+      if (node) {
+        node.x = x;
+        node.y = y;
+        nodePositions.set(nodeId, { x, y });
+      }
+
+      drawConnections();
+    }
+
+    function stopDrag() {
+      if (!draggedNode) return;
+      draggedNode.classList.remove('dragging');
+      saveLayoutSnapshot();
+      draggedNode = null;
+      drawConnections();
+      document.removeEventListener('mousemove', drag);
+      document.removeEventListener('mouseup', stopDrag);
+    }
+
+    function applyNodePositionsToDOM() {
+      nodes.forEach(node => {
+        const nodeEl = canvas.querySelector(`.node[data-id="${node.id}"]`);
+        if (nodeEl) {
+          nodeEl.style.left = `${node.x}px`;
+          nodeEl.style.top = `${node.y}px`;
+        }
+      });
+      drawConnections();
+    }
+
+    saveBtn.addEventListener('click', () => {
+      downloadLayoutSnapshot();
+    });
+
+    restoreBtn.addEventListener('click', () => {
+      restoreFileInput.value = '';
+      restoreFileInput.click();
+    });
+
+    restoreFileInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      importLayoutSnapshot(file);
+    });
+  </script>
+</body>
+</html>
