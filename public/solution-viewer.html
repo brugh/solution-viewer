@@ -14,12 +14,30 @@
       padding: 20px;
     }
 
+    .action-modal {
+      top: 90px;
+      max-height: calc(50vh - 70px);
+    }
+
+    .env-modal {
+      bottom: 40px;
+      max-height: calc(50vh - 70px);
+    }
+
     #controls {
       background: white;
       padding: 15px;
       border-radius: 8px;
       margin-bottom: 20px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      font-size: 14px;
+    }
+
+    #controls button,
+    #controls label,
+    #controls select,
+    #controls input[type="file"] {
+      font-size: 14px;
     }
 
     #fileInput {
@@ -43,6 +61,22 @@
       position: relative;
       overflow: auto;
       min-height: 600px;
+    }
+    #canvas::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image:
+        linear-gradient(to right, rgba(0, 120, 212, 0.15) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 120, 212, 0.28) 1px, transparent 1px);
+      background-size: var(--grid-column-width, 150px) var(--grid-row-height, 140px);
+      background-position: var(--grid-offset-x, 0px) var(--grid-offset-y, 0px);
+      pointer-events: none;
+      z-index: 0;
+      border-radius: 8px;
     }
 
     svg {
@@ -95,6 +129,25 @@
     .node-foreach, .node-until {
       border-color: #8764b8;
       background: #f8f0ff;
+    }
+
+    .node-api {
+      border-color: #107c41;
+      background: #f0fff4;
+    }
+
+    .env-highlight {
+      background: #fff59d;
+      border-radius: 4px;
+      padding: 0 4px;
+      font-weight: 600;
+    }
+
+    .guid-highlight {
+      background: #dbeafe;
+      border-radius: 4px;
+      padding: 0 4px;
+      font-weight: 600;
     }
 
     .node-header {
@@ -160,6 +213,68 @@
       border-radius: 8px;
       margin: 20px 0;
     }
+
+    .api-popover {
+      position: fixed;
+      right: 20px;
+      width: 640px;
+      overflow: auto;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+      border: 1px solid #e0e0e0;
+      z-index: 2000;
+      display: none;
+    }
+
+    .api-popover.visible {
+      display: block;
+    }
+
+    .api-popover header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid #eee;
+      font-weight: 600;
+      font-size: 14px;
+      color: #0f172a;
+    }
+
+    .api-popover button.close-btn {
+      border: none;
+      background: transparent;
+      font-size: 18px;
+      cursor: pointer;
+      color: #555;
+    }
+
+    .api-popover .content {
+      padding: 12px 16px 16px;
+      font-size: 13px;
+      color: #1f2937;
+    }
+
+    .api-popover .info-row {
+      margin-bottom: 10px;
+    }
+
+    .api-popover .info-row span.label {
+      font-weight: 600;
+      display: block;
+      margin-bottom: 2px;
+      color: #374151;
+    }
+
+    .api-popover pre {
+      background: #f5f7fa;
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 12px;
+      overflow: auto;
+      max-height: 200px;
+    }
   </style>
 </head>
 <body>
@@ -169,13 +284,36 @@
       <option value="">Select a flow...</option>
     </select>
     <button id="clearBtn" style="display:none; padding:8px; background:#d83b01; color:white; border:none; border-radius:4px; cursor:pointer;">Clear Cache</button>
+    <button id="resetLayoutBtn" style="display:none; padding:8px; border:1px solid #9ca3af; border-radius:4px; background:#fff; color:#374151; cursor:pointer;">Clear Layout</button>
+    <button id="envBtn" style="display:none; padding:8px; border:1px solid #0078d4; border-radius:4px; background:#fff; color:#0078d4; cursor:pointer;">Environment Variables</button>
+    <label id="guidBtn" for="guidFile" style="display:none; padding:8px; border:1px solid #2563eb; border-radius:4px; background:#fff; color:#2563eb; cursor:pointer;">Upload GUID CSV</label>
+    <select id="guidTagSelector" style="display:none; padding:8px;">
+      <option value="">Select GUID tag...</option>
+    </select>
     <button id="savePositions" style="display:none; padding:8px;">Save Layout</button>
     <button id="restorePositions" style="display:none; padding:8px;">Restore Layout</button>
     <input type="file" id="restoreFile" accept="application/json" style="display:none">
+    <input type="file" id="guidFile" accept=".csv" style="position:absolute; left:-9999px; width:1px; height:1px; opacity:0; pointer-events:none;">
     <span id="flowName" style="margin-left:auto;"></span>
   </div>
 
   <div id="canvas" style="margin-top:70px;"></div>
+
+  <div id="envModal" class="api-popover env-modal">
+    <header>
+      <span>Environment Variables</span>
+      <button class="close-btn" id="envModalClose" aria-label="Close">&times;</button>
+    </header>
+    <div class="content" id="envModalContent"></div>
+  </div>
+
+  <div id="apiPopover" class="api-popover action-modal">
+    <header>
+      <span id="apiPopoverTitle"></span>
+      <button class="close-btn  " id="apiPopoverClose" aria-label="Close">&times;</button>
+    </header>
+    <div class="content" id="apiPopoverContent"></div>
+  </div>
 
   <script>
     const canvas = document.getElementById('canvas');
@@ -183,9 +321,20 @@
     const flowNameEl = document.getElementById('flowName');
     const flowSelector = document.getElementById('flowSelector');
     const clearBtn = document.getElementById('clearBtn');
+    const envBtn = document.getElementById('envBtn');
+    const guidBtn = document.getElementById('guidBtn');
+    const resetLayoutBtn = document.getElementById('resetLayoutBtn');
     const saveBtn = document.getElementById('savePositions');
     const restoreBtn = document.getElementById('restorePositions');
     const restoreFileInput = document.getElementById('restoreFile');
+    const guidFileInput = document.getElementById('guidFile');
+    const apiPopover = document.getElementById('apiPopover');
+    const apiPopoverTitle = document.getElementById('apiPopoverTitle');
+    const apiPopoverContent = document.getElementById('apiPopoverContent');
+    const apiPopoverClose = document.getElementById('apiPopoverClose');
+    const envModal = document.getElementById('envModal');
+    const envModalContent = document.getElementById('envModalContent');
+    const envModalClose = document.getElementById('envModalClose');
 
     let flowData = null;
     let nodes = [];
@@ -196,19 +345,75 @@
     let db = null;
     let currentSolution = null;
     let dbInitPromise = null;
+    let environmentVariables = [];
+    let currentGuidTag = '';
+    const guidMappings = new Map();
+    let guidControlsInitialized = false;
+    let availableGuidTags = [];
+
     const LAST_SOLUTION_KEY = 'flow_viewer_last_solution';
     const LAST_FLOW_KEY = 'flow_viewer_last_flow';
 
     // Layout constants
     const NODE_WIDTH = 200;
     const NODE_HEIGHT = 80;
-    const VERTICAL_SPACING = 120;
+    const VERTICAL_SPACING = 140;
     const HORIZONTAL_SPACING = 300;
     const START_X = 100;
     const START_Y = 50;
+    const GRID_COLUMN_WIDTH = HORIZONTAL_SPACING / 2;
+    const GRID_ROW_HEIGHT = VERTICAL_SPACING;
+
+    const DB_VERSION = 3;
+    const GUID_MAP_STORE = 'guidMaps';
+    const GUID_TAG_INDEX = 'tag';
+    const GUID_VALUE_INDEX = 'guidNormalized';
+    const GUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+    const gridToPixelX = (col) => START_X + col * GRID_COLUMN_WIDTH;
+    const gridToPixelY = (row) => START_Y + row * GRID_ROW_HEIGHT;
+    const pixelToGridX = (x) => Math.round((x - START_X) / GRID_COLUMN_WIDTH);
+    const pixelToGridY = (y) => Math.round((y - START_Y) / GRID_ROW_HEIGHT);
 
     const nodePositions = new Map();
     let currentFlowId = null;
+    let suppressNodeClick = false;
+    let dragMoved = false;
+
+    initializeGuidControls();
+    ensureDB().catch(err => console.error('Failed to initialize database', err));
+
+    function updateNodePixelPosition(node) {
+      node.x = gridToPixelX(node.gridCol ?? 0);
+      node.y = gridToPixelY(node.gridRow ?? 0);
+    }
+
+    function updateGridBackground() {
+      canvas.style.setProperty('--grid-column-width', `${GRID_COLUMN_WIDTH}px`);
+      canvas.style.setProperty('--grid-row-height', `${GRID_ROW_HEIGHT}px`);
+      canvas.style.setProperty('--grid-offset-x', `${START_X % GRID_COLUMN_WIDTH}px`);
+      canvas.style.setProperty('--grid-offset-y', `${START_Y % GRID_ROW_HEIGHT}px`);
+    }
+
+    updateGridBackground();
+
+    function setNodeGridPosition(node, gridCol, gridRow) {
+      node.gridCol = gridCol;
+      node.gridRow = gridRow;
+      updateNodePixelPosition(node);
+      nodePositions.set(node.id, { gridCol, gridRow });
+    }
+
+    function normalizeSnapshotPosition(saved) {
+      if (!saved) return null;
+      if (typeof saved.gridCol === 'number' && typeof saved.gridRow === 'number') {
+        return { gridCol: saved.gridCol, gridRow: saved.gridRow };
+      }
+      if (typeof saved.x === 'number' && typeof saved.y === 'number') {
+        return { gridCol: pixelToGridX(saved.x), gridRow: pixelToGridY(saved.y) };
+      }
+      return null;
+    }
 
     function getCurrentFlowKey() {
       return currentFlowId ||
@@ -226,7 +431,14 @@
     function serializeCurrentLayout() {
       const payload = {};
       nodePositions.forEach((pos, nodeId) => {
-        payload[nodeId] = pos;
+        if (typeof pos?.gridCol === 'number' && typeof pos?.gridRow === 'number') {
+          payload[nodeId] = {
+            gridCol: pos.gridCol,
+            gridRow: pos.gridRow,
+            x: gridToPixelX(pos.gridCol),
+            y: gridToPixelY(pos.gridRow)
+          };
+        }
       });
       return payload;
     }
@@ -239,6 +451,51 @@
       } catch (err) {
         console.warn('Failed to save layout', err);
       }
+    }
+
+    async function trySelectGuidTagFromEnvironment(envVars = environmentVariables) {
+      if (!envVars || !envVars.length) return false;
+      if (!availableGuidTags.length) return false;
+      for (const tag of availableGuidTags) {
+        if (!guidMappings.has(tag) || guidMappings.get(tag)?.size === 0) {
+          await loadGuidMappingsForTag(tag);
+        }
+        const map = guidMappings.get(tag);
+        if (!map || map.size === 0) continue;
+        for (const env of envVars) {
+          const rawValue = env?.value || env?.defaultValue;
+          const normalized = normalizeGuidValue(rawValue);
+          if (normalized && map.has(normalized)) {
+            await setCurrentGuidTag(tag);
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    async function autoSelectGuidTagForFlow(definition) {
+      if (!availableGuidTags.length) {
+        await refreshGuidTagOptions(currentGuidTag);
+      }
+      if (await trySelectGuidTagFromEnvironment()) {
+        return;
+      }
+      if (!definition || availableGuidTags.length === 0) {
+        updateGuidTagDisplay();
+        return;
+      }
+      const serialized = JSON.stringify(definition);
+      const matches = serialized.match(GUID_REGEX) || [];
+      const uniqueGuids = Array.from(new Set(matches.map(guid => normalizeGuidValue(guid)).filter(Boolean)));
+      for (const normalizedGuid of uniqueGuids) {
+        const matchingTag = await findTagForGuid(normalizedGuid);
+        if (matchingTag) {
+          await setCurrentGuidTag(matchingTag);
+          return;
+        }
+      }
+      updateGuidTagDisplay();
     }
 
     function loadLayoutSnapshot() {
@@ -257,14 +514,16 @@
       if (!snapshot) return false;
       let applied = false;
       nodes.forEach(node => {
-        const saved = snapshot[node.id];
-        if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
-          node.x = saved.x;
-          node.y = saved.y;
-          nodePositions.set(node.id, { x: saved.x, y: saved.y });
+        const normalized = normalizeSnapshotPosition(snapshot[node.id]);
+        if (normalized) {
+          setNodeGridPosition(node, normalized.gridCol, normalized.gridRow);
           applied = true;
         } else if (!nodePositions.has(node.id)) {
-          nodePositions.set(node.id, { x: node.x, y: node.y });
+          const fallback = {
+            gridCol: node.gridCol ?? pixelToGridX(node.x ?? START_X),
+            gridRow: node.gridRow ?? pixelToGridY(node.y ?? START_Y)
+          };
+          nodePositions.set(node.id, fallback);
         }
       });
       return applied;
@@ -303,7 +562,7 @@
     // IndexedDB setup
     function initDB() {
       return new Promise((resolve, reject) => {
-        const request = indexedDB.open('PowerAutomateSolutions', 1);
+        const request = indexedDB.open('PowerAutomateSolutions', DB_VERSION);
         
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
@@ -320,14 +579,36 @@
             const flowStore = database.createObjectStore('flows', { keyPath: 'id' });
             flowStore.createIndex('solutionId', 'solutionId', { unique: false });
           }
+          if (!database.objectStoreNames.contains('flowLayouts')) {
+            database.createObjectStore('flowLayouts', { keyPath: 'id' });
+          }
+          if (!database.objectStoreNames.contains(GUID_MAP_STORE)) {
+            const guidStore = database.createObjectStore(GUID_MAP_STORE, { keyPath: 'id' });
+            guidStore.createIndex(GUID_TAG_INDEX, 'tag', { unique: false });
+            guidStore.createIndex(GUID_VALUE_INDEX, 'guidNormalized', { unique: false });
+          } else {
+            const guidStore = e.target.transaction?.objectStore(GUID_MAP_STORE);
+            if (guidStore && !guidStore.indexNames.contains(GUID_VALUE_INDEX)) {
+              guidStore.createIndex(GUID_VALUE_INDEX, 'guidNormalized', { unique: false });
+            }
+            if (guidStore && !guidStore.indexNames.contains(GUID_TAG_INDEX)) {
+              guidStore.createIndex(GUID_TAG_INDEX, 'tag', { unique: false });
+            }
+          }
         };
       });
     }
 
     function ensureDB() {
-      if (db) return Promise.resolve(db);
+      if (db) {
+        initializeGuidControls();
+        return Promise.resolve(db);
+      }
       if (!dbInitPromise) {
-        dbInitPromise = initDB();
+        dbInitPromise = initDB().then(database => {
+          initializeGuidControls();
+          return database;
+        });
       }
       return dbInitPromise;
     }
@@ -384,14 +665,331 @@
       });
     }
 
+    function initializeGuidControls(forceRefresh = false) {
+      if (!guidControlsInitialized) {
+        guidControlsInitialized = true;
+        guidBtn.style.display = 'inline-block';
+        guidTagSelector.style.display = 'inline-block';
+        guidFileInput.addEventListener('change', (e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            handleGuidFileSelection(file);
+          }
+        });
+        guidTagSelector.addEventListener('change', (e) => {
+          const tag = e.target.value || '';
+          setCurrentGuidTag(tag, { updateSelector: false });
+        });
+      } else {
+        guidBtn.style.display = 'inline-block';
+        guidTagSelector.style.display = 'inline-block';
+      }
+
+      if (forceRefresh || (db && guidTagSelector.options.length <= 1)) {
+        refreshGuidTagOptions();
+      }
+    }
+
+    async function refreshGuidTagOptions(preferredTag = currentGuidTag) {
+      if (!db) return;
+      const tags = await fetchGuidTags();
+      availableGuidTags = tags;
+      guidTagSelector.innerHTML = '<option value="">Select GUID tag...</option>';
+      tags.forEach(tag => {
+        const option = document.createElement('option');
+        option.value = tag;
+        option.textContent = tag;
+        guidTagSelector.appendChild(option);
+      });
+      const nextTag = preferredTag && tags.includes(preferredTag) ? preferredTag : '';
+      await setCurrentGuidTag(nextTag, { updateSelector: true });
+    }
+
+    function fetchGuidTags() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(GUID_MAP_STORE, 'readonly');
+        const store = tx.objectStore(GUID_MAP_STORE);
+        const index = store.index(GUID_TAG_INDEX);
+        const tags = new Set();
+        index.openCursor().onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            if (cursor.value?.tag) tags.add(cursor.value.tag);
+            cursor.continue();
+          } else {
+            resolve(Array.from(tags).sort());
+          }
+        };
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function setCurrentGuidTag(tag, { updateSelector = true } = {}) {
+      currentGuidTag = tag || '';
+      if (currentGuidTag) {
+        await loadGuidMappingsForTag(currentGuidTag);
+      }
+      if (updateSelector) {
+        guidTagSelector.value = currentGuidTag;
+      }
+      updateGuidTagDisplay();
+    }
+
+    function loadGuidMappingsForTag(tag) {
+      if (!tag) {
+        guidMappings.set('', new Map());
+        return Promise.resolve(new Map());
+      }
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(GUID_MAP_STORE, 'readonly');
+        const store = tx.objectStore(GUID_MAP_STORE);
+        const index = store.index(GUID_TAG_INDEX);
+        const request = index.getAll(tag);
+        request.onsuccess = () => {
+          const records = request.result || [];
+          const map = buildGuidMapFromRecords(records);
+          guidMappings.set(tag, map);
+          resolve(map);
+        };
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function buildGuidMapFromRecords(records = []) {
+      const map = new Map();
+      records.forEach(record => {
+        const normalized = record.guidNormalized || normalizeGuidValue(record.displayGuid || record.guid || '');
+        if (!normalized) return;
+        map.set(normalized, {
+          name: record.name || record.displayGuid || normalized,
+          guid: record.displayGuid || record.guid || normalized
+        });
+      });
+      return map;
+    }
+
+    function normalizeGuidValue(value) {
+      if (!value) return '';
+      return String(value).toLowerCase().replace(/[{}]/g, '').trim();
+    }
+
+    function deriveGuidTagFromFileName(name) {
+      if (!name) return '';
+      return name.replace(/\.[^/.]+$/, '');
+    }
+
+    function splitCsvLine(line) {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            current += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (char === ',' && !inQuotes) {
+          result.push(current);
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      result.push(current);
+      return result;
+    }
+
+    function parseGuidCsv(text) {
+      const lines = text.split(/\r?\n/).map(line => line.trim()).filter(line => line);
+      if (lines.length === 0) return [];
+      let startIndex = 0;
+      let guidIndex = 0;
+      let nameIndex = 1;
+      const headerCells = splitCsvLine(lines[0]).map(cell => cell.trim());
+      const lowered = headerCells.map(cell => cell.toLowerCase());
+      const guidHeaders = ['guid', 'id', 'value', 'identifier'];
+      const nameHeaders = ['name', 'displayname', 'label', 'friendlyname'];
+      const headerHasGuid = lowered.some(cell => guidHeaders.includes(cell));
+      const headerHasName = lowered.some(cell => nameHeaders.includes(cell));
+      if (headerHasGuid && headerHasName) {
+        guidIndex = lowered.findIndex(cell => guidHeaders.includes(cell));
+        nameIndex = lowered.findIndex(cell => nameHeaders.includes(cell));
+        startIndex = 1;
+      }
+      const entries = [];
+      for (let i = startIndex; i < lines.length; i++) {
+        const cells = splitCsvLine(lines[i]);
+        const guid = (cells[guidIndex] || '').trim();
+        const name = (cells[nameIndex] || '').trim();
+        if (!guid) continue;
+        entries.push({ guid, name: name || guid });
+      }
+      return entries;
+    }
+
+    function clearGuidMappingsForTag(tag) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(GUID_MAP_STORE, 'readwrite');
+        const store = tx.objectStore(GUID_MAP_STORE);
+        const index = store.index(GUID_TAG_INDEX);
+        const range = IDBKeyRange.only(tag);
+        index.openCursor(range).onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            cursor.delete();
+            cursor.continue();
+          }
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function saveGuidMappingsForTag(tag, entries) {
+      await clearGuidMappingsForTag(tag);
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(GUID_MAP_STORE, 'readwrite');
+        const store = tx.objectStore(GUID_MAP_STORE);
+        entries.forEach(entry => {
+          const normalized = normalizeGuidValue(entry.guid);
+          if (!normalized) return;
+          store.put({
+            id: `${tag}::${normalized}`,
+            tag,
+            guidNormalized: normalized,
+            displayGuid: entry.guid,
+            name: entry.name || entry.guid
+          });
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function handleGuidFileSelection(file) {
+      if (!file) return;
+      await ensureDB();
+      const derivedTag = deriveGuidTagFromFileName(file.name) || `guid_tag_${Date.now()}`;
+      const tag = derivedTag.replace(/[^a-zA-Z0-9_-]+/g, '_') || `guid_tag_${Date.now()}`;
+      try {
+        const text = await file.text();
+        const entries = parseGuidCsv(text);
+        if (!entries.length) {
+          alert('No GUID records found in the CSV file.');
+          return;
+        }
+        await saveGuidMappingsForTag(tag, entries);
+        guidMappings.delete(tag);
+        await refreshGuidTagOptions(tag);
+        alert(`Imported ${entries.length} GUID mappings into tag "${tag}".`);
+      } catch (err) {
+        console.error('Failed to import GUID CSV', err);
+        alert('Failed to import GUID CSV. Please ensure it is a valid UTF-8 CSV file.');
+      }
+      guidFileInput.value = '';
+    }
+
+    function findGuidMappingMatch(value) {
+      if (!currentGuidTag) return null;
+      const map = guidMappings.get(currentGuidTag);
+      if (!map || map.size === 0) return null;
+      const str = String(value ?? '');
+      const lower = str.toLowerCase();
+      for (const [normalized, meta] of map.entries()) {
+        const candidates = new Set();
+        candidates.add(normalized);
+        candidates.add(`{${normalized}}`);
+        if (meta.guid) {
+          candidates.add(meta.guid.toLowerCase());
+          candidates.add(meta.guid.toLowerCase().replace(/[{}]/g, ''));
+        }
+        for (const candidate of candidates) {
+          if (!candidate) continue;
+          const idx = lower.indexOf(candidate);
+          if (idx !== -1) {
+            const matchText = str.substring(idx, idx + candidate.length);
+            return {
+              guid: matchText,
+              name: meta.name
+            };
+          }
+        }
+      }
+      return null;
+    }
+
+    function findGuidMappingInText(text) {
+      if (!currentGuidTag || !text) return null;
+      return findGuidMappingMatch(text);
+    }
+
+    function findGuidRecordsByGuid(normalizedGuid) {
+      return new Promise((resolve, reject) => {
+        if (!db) return resolve([]);
+        const tx = db.transaction(GUID_MAP_STORE, 'readonly');
+        const index = tx.objectStore(GUID_MAP_STORE).index(GUID_VALUE_INDEX);
+        const request = index.getAll(normalizedGuid);
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => {
+          console.warn('Failed to query GUID index', request.error);
+          resolve([]);
+        };
+      });
+    }
+
+    function updateGuidTagDisplay() {
+      if (!flowNameEl) return;
+      if (!currentGuidTag) {
+        flowNameEl.textContent = '';
+        return;
+      }
+      const map = guidMappings.get(currentGuidTag);
+      const firstEntry = map && map.size > 0 ? map.values().next().value : null;
+      if (firstEntry) {
+        flowNameEl.textContent = `GUID tag: ${currentGuidTag}`;
+      } else {
+        flowNameEl.textContent = `GUID tag: ${currentGuidTag} (0 entries)`;
+      }
+    }
+
+    let guidLookupCache = new Map();
+
+    async function findTagForGuid(normalizedGuid) {
+      if (guidLookupCache.has(normalizedGuid)) {
+        return guidLookupCache.get(normalizedGuid);
+      }
+      const records = await findGuidRecordsByGuid(normalizedGuid);
+      const tag = records.length ? records[0].tag : null;
+      guidLookupCache.set(normalizedGuid, tag);
+      return tag;
+    }
+
+    function cacheGuidTagLookup(normalizedGuid) {
+      if (guidLookupCache.has(normalizedGuid)) {
+          const tag = guidLookupCache.get(normalizedGuid);
+          if (tag && currentGuidTag !== tag) {
+            setCurrentGuidTag(tag);
+          }
+          return tag;
+      }
+      return null;
+    }
+
     async function clearCache() {
       const tx = db.transaction(['solutions', 'flows'], 'readwrite');
       await tx.objectStore('solutions').clear();
       await tx.objectStore('flows').clear();
       flowSelector.style.display = 'none';
       clearBtn.style.display = 'none';
+      resetLayoutBtn.style.display = 'none';
+      envBtn.style.display = 'none';
       saveBtn.style.display = 'none';
       restoreBtn.style.display = 'none';
+      guidBtn.style.display = 'none';
+      guidTagSelector.style.display = 'none';
       flowSelector.innerHTML = '<option value="">Select a flow...</option>';
       canvas.innerHTML = '';
       flowNameEl.textContent = '';
@@ -400,6 +998,7 @@
       nodes = [];
       edges = [];
       nodePositions.clear();
+      environmentVariables = [];
       flowSelector.value = '';
       fileInput.value = '';
       localStorage.removeItem(LAST_SOLUTION_KEY);
@@ -408,6 +1007,9 @@
       // Remove any saved layout snapshots
       Object.keys(localStorage).forEach(key => {
         if (key.startsWith('flow_layout_')) {
+          localStorage.removeItem(key);
+        }
+        if (key.startsWith('env_vars_')) {
           localStorage.removeItem(key);
         }
       });
@@ -424,7 +1026,6 @@
         const text = await file.text();
         flowData = JSON.parse(text);
         currentFlowId = flowData?.properties?.name || flowData?.name || file.name;
-        nodePositions.clear();
         renderFlow();
       }
     });
@@ -490,6 +1091,7 @@
             : solutions[solutions.length - 1];
           currentSolution = lastSolution.id;
           localStorage.setItem(LAST_SOLUTION_KEY, currentSolution);
+          environmentVariables = loadEnvironmentVariablesFromStorage(currentSolution);
           const flows = await loadFlowsBySolution(lastSolution.id);
 
           // Populate selector
@@ -503,8 +1105,11 @@
 
           flowSelector.style.display = 'inline-block';
           clearBtn.style.display = 'inline-block';
+          resetLayoutBtn.style.display = 'inline-block';
+          envBtn.style.display = 'inline-block';
           saveBtn.style.display = 'inline-block';
           restoreBtn.style.display = 'inline-block';
+          initializeGuidControls();
           canvas.innerHTML = `<div style="padding: 20px; color: #666;">Loaded cached solution: ${lastSolution.name}<br>Select a flow to visualize</div>`;
 
           const lastFlow = localStorage.getItem(LAST_FLOW_KEY);
@@ -516,9 +1121,11 @@
       } else {
         // Save to IndexedDB with deterministic ID
         const solutionId = deriveSolutionId(file.name);
+        environmentVariables = await extractEnvironmentVariablesFromZip(zip);
         const savedSolutionId = await saveSolution(solutionId, file.name.replace(/\.zip$/i, '') || solutionId, flows);
         currentSolution = savedSolutionId;
         localStorage.setItem(LAST_SOLUTION_KEY, savedSolutionId);
+        localStorage.setItem(getEnvVarStorageKey(savedSolutionId), JSON.stringify(environmentVariables));
 
         // Populate selector
         flowSelector.innerHTML = '<option value="">Select a flow...</option>';
@@ -531,8 +1138,11 @@
 
         flowSelector.style.display = 'inline-block';
         clearBtn.style.display = 'inline-block';
+        resetLayoutBtn.style.display = 'inline-block';
+        envBtn.style.display = 'inline-block';
         saveBtn.style.display = 'inline-block';
         restoreBtn.style.display = 'inline-block';
+        initializeGuidControls();
         canvas.innerHTML = '<div style="padding: 20px; color: #666;">Select a flow from the dropdown to visualize</div>';
 
         // auto-select last flow if exists
@@ -560,6 +1170,8 @@
         if (flow && flow.data) {
           flowData = flow.data;
           localStorage.setItem(LAST_FLOW_KEY, flowId);
+          const solutionId = flow.solutionId || currentSolution || getCurrentSolutionIdFromFlowId(flowId);
+          environmentVariables = loadEnvironmentVariablesFromStorage(solutionId);
           renderFlow();
           saveBtn.style.display = 'inline-block';
           restoreBtn.style.display = 'inline-block';
@@ -586,11 +1198,11 @@
       }
 
       const def = flowData.properties.definition;
-      
+      console.log(def)
       // Extract display name from definition metadata or use a default
       const displayName = def.metadata?.flowDisplayName || 
                          flowData.properties?.displayName || 
-                         '<no displayname for flow>';
+                         null;
       flowNameEl.textContent = displayName;
 
       nodes = [];
@@ -606,7 +1218,9 @@
       // Populate position map
       nodePositions.clear();
       nodes.forEach(node => {
-        nodePositions.set(node.id, { x: node.x, y: node.y });
+        const gridCol = node.gridCol ?? pixelToGridX(node.x ?? START_X);
+        const gridRow = node.gridRow ?? pixelToGridY(node.y ?? START_Y);
+        setNodeGridPosition(node, gridCol, gridRow);
       });
 
       // Render to DOM
@@ -656,7 +1270,7 @@
           const nodeId = prefix ? `${prefix}_${name}` : name;
           if (graph.nodes.has(nodeId)) return;
 
-          graph.nodes.set(nodeId, {
+          const nodeData = {
             id: nodeId,
             label: name,
             type: getNodeType(action.type),
@@ -667,8 +1281,11 @@
             children: [],
             parentContainer: parentId,
             branch,
-            level
-          });
+            level,
+            resolvedRunAfter: []
+          };
+
+          graph.nodes.set(nodeId, nodeData);
 
           if (parentId) {
             if (!graph.containerChildren.has(parentId)) {
@@ -681,6 +1298,7 @@
           if (action.runAfter && Object.keys(action.runAfter).length > 0) {
             Object.keys(action.runAfter).forEach(parent => {
               const resolvedParent = prefix ? `${prefix}_${parent}` : parent;
+              nodeData.resolvedRunAfter.push(resolvedParent);
               graph.edges.push({ from: resolvedParent, to: nodeId });
             });
           } else if (parentId) {
@@ -699,6 +1317,15 @@
             }
             if (action.else?.actions) {
               addActions(action.else.actions, nodeId, nodeId, 'else', level + 1);
+            }
+          } else if (action.type === 'Switch') {
+            Object.entries(action.cases || {}).forEach(([caseName, caseDef]) => {
+              if (caseDef.actions) {
+                addActions(caseDef.actions, nodeId, `${nodeId}_${caseName}`, `case:${caseName}`, level + 1);
+              }
+            });
+            if (action.default?.actions) {
+              addActions(action.default.actions, nodeId, `${nodeId}_default`, 'case:default', level + 1);
             }
           } else if (action.actions) {
             addActions(action.actions, nodeId, nodeId, branch, level + 1);
@@ -807,27 +1434,39 @@
       const edgesToRemove = new Set();
       const edgesToAdd = [];
 
+      const edgesByFrom = new Map();
+      graph.edges.forEach(edge => {
+        if (!edgesByFrom.has(edge.from)) edgesByFrom.set(edge.from, []);
+        edgesByFrom.get(edge.from).push(edge.to);
+      });
+
       graph.nodes.forEach(node => {
         const type = node.actionType?.toLowerCase();
         if (!loopTypes.has(type || '')) return;
 
         const containerId = node.id;
-        const orderedChildren = graph.containerChildren.get(containerId) || [];
-        const lastChildId = orderedChildren[orderedChildren.length - 1];
-        if (!lastChildId) return;
-
-        const childIds = new Set();
+        const loopNodeIds = new Set();
         graph.nodes.forEach(candidate => {
-          if (candidate.id.startsWith(`${containerId}_`)) {
-            childIds.add(candidate.id);
+          if (candidate.id === containerId || candidate.id.startsWith(`${containerId}_`)) {
+            loopNodeIds.add(candidate.id);
           }
         });
 
-        const targets = getDescendantEndpoints(graph, lastChildId);
+        const endpoints = [];
+        loopNodeIds.forEach(loopNodeId => {
+          if (loopNodeId === containerId) return;
+          const children = edgesByFrom.get(loopNodeId) || [];
+          const hasChildInside = children.some(childId => loopNodeIds.has(childId));
+          if (!hasChildInside) {
+            endpoints.push(loopNodeId);
+          }
+        });
+
+        const targets = endpoints.length ? endpoints : [containerId];
 
         graph.edges.forEach((edge, idx) => {
           if (edge.from === containerId) {
-            if (childIds.has(edge.to)) return;
+            if (loopNodeIds.has(edge.to)) return;
             edgesToRemove.add(idx);
             targets.forEach(endpoint => {
               edgesToAdd.push({ from: endpoint, to: edge.to });
@@ -849,11 +1488,42 @@
         indegree.set(nodeId, 0);
       });
 
+      const conditionBranchRoots = new Map();
+      graph.nodes.forEach(node => {
+        if (node.type !== 'condition') return;
+        const children = graph.containerChildren.get(node.id) || [];
+        const roots = [];
+        children.forEach(childId => {
+          const childNode = graph.nodes.get(childId);
+          if (!childNode) return;
+          const hasRunAfter = childNode.details?.runAfter && Object.keys(childNode.details.runAfter).length > 0;
+          if (!hasRunAfter) {
+            roots.push(childId);
+          }
+        });
+        conditionBranchRoots.set(node.id, roots);
+      });
+
+      const isLoopEntryNode = (node) => {
+        if (!node?.parentContainer) return false;
+        const loopNode = graph.nodes.get(node.parentContainer);
+        if (!loopNode) return false;
+        if (loopNode.type !== 'foreach' && loopNode.type !== 'until') return false;
+        if (!node.parents || node.parents.length === 0) return true;
+        return node.parents.every(parentId => {
+          const parentNode = graph.nodes.get(parentId);
+          return parentNode?.parentContainer !== node.parentContainer;
+        });
+      };
+
       graph.edges.forEach(edge => {
         if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);
         adjacency.get(edge.from).push(edge.to);
         indegree.set(edge.to, (indegree.get(edge.to) || 0) + 1);
       });
+
+      const LOOP_ENTRY_INDENT = HORIZONTAL_SPACING / 2;
+      const SINGLE_BRANCH_CONDITION_INDENT = HORIZONTAL_SPACING / 2;
 
       const queue = [];
       indegree.forEach((deg, nodeId) => {
@@ -875,42 +1545,78 @@
         if (!node) continue;
 
         const nodeDepth = node.level ?? 0;
-        let x = START_X + nodeDepth * HORIZONTAL_SPACING;
         const singleParent = node.parents.length === 1 ? node.parents[0] : null;
         const parentNode = singleParent ? graph.nodes.get(singleParent) : null;
         const parentPosition = singleParent ? nodePositionMap.get(singleParent) : null;
-        const isConditionBranchRoot = parentNode?.type === 'condition'
-          && node.parentContainer === singleParent
-          && (!node.details?.runAfter || Object.keys(node.details.runAfter).length === 0);
-
-        if (isConditionBranchRoot && parentPosition) {
-          x = parentPosition.x;
-          if (node.branch === 'then') {
-            x -= HORIZONTAL_SPACING / 2;
-          } else if (node.branch === 'else') {
-            x += HORIZONTAL_SPACING / 2;
-          }
-        } else {
-          if (node.branch === 'then') {
-            x -= HORIZONTAL_SPACING / 2;
-          } else if (node.branch === 'else') {
-            x += HORIZONTAL_SPACING / 2;
-          }
-        }
+        const branchRoots = singleParent ? conditionBranchRoots.get(singleParent) || [] : [];
+        const branchIndex = branchRoots.indexOf(nodeId);
+        const isConditionBranchRoot = parentNode?.type === 'condition' && branchIndex !== -1;
 
         const parentPositions = node.parents
           .map(parentId => nodePositionMap.get(parentId))
           .filter(pos => pos);
-        const parentYs = parentPositions.map(pos => pos.y);
+        const runAfterParentIds = (node.resolvedRunAfter && node.resolvedRunAfter.length > 0)
+          ? node.resolvedRunAfter
+          : Object.keys(node.details?.runAfter || {});
+        const runAfterEntries = runAfterParentIds
+          .map(parentId => {
+            const parentNode = graph.nodes.get(parentId);
+            const position = nodePositionMap.get(parentId);
+            return position ? { id: parentId, node: parentNode, position } : null;
+          })
+          .filter(entry => entry);
+        const runAfterPositions = runAfterEntries.map(entry => entry.position);
 
-        if (!isConditionBranchRoot && parentPositions.length === 1) {
+        let x;
+        let loopExitAligned = false;
+        if (runAfterPositions.length === 1) {
+          x = runAfterPositions[0].x;
+        } else if (runAfterPositions.length > 1) {
+          x = runAfterPositions.reduce((sum, pos) => sum + pos.x, 0) / runAfterPositions.length;
+        } else if (parentPositions.length === 1) {
           x = parentPositions[0].x;
+        } else if (parentPositions.length > 1) {
+          x = parentPositions.reduce((sum, pos) => sum + pos.x, 0) / parentPositions.length;
+        } else {
+          x = START_X + nodeDepth * HORIZONTAL_SPACING;
         }
 
-        if (parentPositions.length > 1) {
+        if (isConditionBranchRoot && parentPosition) {
+          const branchCount = branchRoots.length || 1;
+          const branchSpacing = (node.type === 'condition' ? HORIZONTAL_SPACING * 1.5 : HORIZONTAL_SPACING);
+          if (branchCount === 1) {
+            x = parentPosition.x + SINGLE_BRANCH_CONDITION_INDENT;
+          } else {
+            const offset = (branchIndex - (branchCount - 1) / 2) * branchSpacing;
+            x = parentPosition.x + offset;
+          }
+        } else if (parentNode?.type === 'condition') {
+          if (node.branch === 'then') {
+            x -= HORIZONTAL_SPACING / 2;
+          } else if (node.branch === 'else') {
+            x += HORIZONTAL_SPACING / 2;
+          }
+        }
+
+        const parentYs = parentPositions.map(pos => pos.y);
+
+        const loopRunAfter = runAfterEntries.find(entry => entry.node && (entry.node.type === 'foreach' || entry.node.type === 'until'));
+        if (loopRunAfter && node.parentContainer !== loopRunAfter.id) {
+          x = loopRunAfter.position.x;
+          loopExitAligned = true;
+        }
+
+        if (isLoopEntryNode(node)) {
+          x += LOOP_ENTRY_INDENT;
+        }
+
+        if (parentPositions.length > 1 && !loopExitAligned) {
           const avgX = parentPositions.reduce((sum, pos) => sum + pos.x, 0) / parentPositions.length;
           x = avgX;
         }
+
+        const horizontalStep = HORIZONTAL_SPACING / 2;
+        x = START_X + Math.round((x - START_X) / horizontalStep) * horizontalStep;
 
         let y;
         if (parentYs.length === 0) {
@@ -921,6 +1627,8 @@
           const maxParentY = Math.max(...parentYs);
           y = maxParentY + VERTICAL_SPACING;
         }
+
+        y = START_Y + Math.round((y - START_Y) / VERTICAL_SPACING) * VERTICAL_SPACING;
 
         nodes.push({
           id: node.id,
@@ -963,7 +1671,7 @@
 
     function getNodeType(actionType) {
       const type = actionType?.toLowerCase() || '';
-      if (type === 'if') return 'condition';
+      if (type === 'if' || type === 'switch') return 'condition';
       if (type === 'foreach' || type === 'until') return type;
       return 'action';
     }
@@ -971,7 +1679,11 @@
     function renderNodes() {
       nodes.forEach(node => {
         const nodeEl = document.createElement('div');
-        nodeEl.className = `node node-${node.type}`;
+        let nodeClass = `node node-${node.type}`;
+        if ((node.actionType || '').toLowerCase() === 'openapiconnection') {
+          nodeClass += ' node-api';
+        }
+        nodeEl.className = nodeClass;
         nodeEl.style.left = `${node.x}px`;
         nodeEl.style.top = `${node.y}px`;
         nodeEl.dataset.id = node.id;
@@ -988,6 +1700,11 @@
         `;
 
         nodeEl.addEventListener('mousedown', startDrag);
+        nodeEl.addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (suppressNodeClick) return;
+          handleNodeSelection(node);
+        });
         canvas.appendChild(nodeEl);
       });
     }
@@ -1043,7 +1760,9 @@
     function startDrag(e) {
       draggedNode = e.currentTarget;
       draggedNode.classList.add('dragging');
-      
+      suppressNodeClick = false;
+      dragMoved = false;
+
       const rect = draggedNode.getBoundingClientRect();
       const canvasRect = canvas.getBoundingClientRect();
       
@@ -1056,6 +1775,8 @@
 
     function drag(e) {
       if (!draggedNode) return;
+      suppressNodeClick = true;
+      dragMoved = true;
 
       const canvasRect = canvas.getBoundingClientRect();
       let x = e.clientX - canvasRect.left - offsetX + canvas.scrollLeft;
@@ -1082,11 +1803,17 @@
     function stopDrag() {
       if (!draggedNode) return;
       draggedNode.classList.remove('dragging');
+      if (dragMoved) {
+        snapNodeToGrid(draggedNode.dataset.id);
+      }
       saveLayoutSnapshot();
       draggedNode = null;
       drawConnections();
       document.removeEventListener('mousemove', drag);
       document.removeEventListener('mouseup', stopDrag);
+      setTimeout(() => {
+        suppressNodeClick = false;
+      }, 0);
     }
 
     function applyNodePositionsToDOM() {
@@ -1114,6 +1841,447 @@
       if (!file) return;
       importLayoutSnapshot(file);
     });
+
+    apiPopoverClose.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideApiPopover();
+    });
+
+    apiPopover.addEventListener('click', (e) => e.stopPropagation());
+    envBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await showEnvironmentVariables();
+    });
+    envModal.addEventListener('click', (e) => e.stopPropagation());
+    envModalClose.addEventListener('click', (e) => {
+      e.stopPropagation();
+      envModal.classList.remove('visible');
+    });
+    document.addEventListener('click', () => {
+      hideApiPopover();
+      envModal.classList.remove('visible');
+    });
+    resetLayoutBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      resetLayoutToDefault();
+    });
+
+    async function handleNodeSelection(node) {
+      await showApiPopover(node);
+    }
+
+    async function showApiPopover(node) {
+      apiPopoverTitle.textContent = node.label;
+      apiPopoverContent.innerHTML = '';
+
+      await ensureGuidContextForNode(node);
+
+      const infoContainer = document.createElement('div');
+
+      const details = node.details || {};
+      const inputs = details.inputs || {};
+      const host = inputs.host || {};
+      const parameters = inputs.parameters || {};
+      const connectionName = host.connectionName || host.connection?.name || '—';
+      const method = inputs.method || inputs?.parameters?.method || '—';
+      const path = inputs.path || inputs?.parameters?.path || '—';
+
+      infoContainer.appendChild(buildInfoRow('Type', null, createHighlightedValue(node.actionType || node.type)));
+      if (connectionName !== '—' || method !== '—' || path !== '—') {
+        infoContainer.appendChild(buildInfoRow('Connection', null, createHighlightedValue(connectionName)));
+        infoContainer.appendChild(buildInfoRow('Method', null, createHighlightedValue(method)));
+        infoContainer.appendChild(buildInfoRow('Path', null, createHighlightedValue(path)));
+      }
+      if (host.apiId) {
+        const apiIdNode = document.createElement('span');
+        apiIdNode.textContent = host.apiId;
+        infoContainer.appendChild(buildInfoRow('API Id', null, apiIdNode));
+      }
+      if (host.operationId) {
+        infoContainer.appendChild(buildInfoRow('Operation', null, createHighlightedValue(host.operationId)));
+      }
+      if (details.runAfter) {
+        infoContainer.appendChild(buildInfoRow('Run After', null, createHighlightedValue(Object.keys(details.runAfter).join(', '))));
+      }
+      if (inputs.body) {
+        const bodyPre = document.createElement('pre');
+        bodyPre.innerHTML = highlightJsonString(inputs.body);
+        infoContainer.appendChild(buildInfoRow('Body', null, bodyPre));
+      }
+
+      if (Object.keys(parameters).length > 0) {
+        const paramsPre = document.createElement('pre');
+        paramsPre.innerHTML = highlightJsonString(parameters);
+        infoContainer.appendChild(buildInfoRow('Parameters', null, paramsPre));
+      }
+
+      const rawPre = document.createElement('pre');
+      rawPre.innerHTML = highlightJsonString(details);
+      infoContainer.appendChild(buildInfoRow('Raw Action', null, rawPre));
+
+      apiPopoverContent.appendChild(infoContainer);
+      apiPopover.classList.add('visible');
+    }
+
+    function hideApiPopover() {
+      apiPopover.classList.remove('visible');
+    }
+
+    async function ensureGuidContextForNode(node) {
+      if (!node?.details) return;
+      const serialized = JSON.stringify(node.details);
+      const matches = serialized.match(GUID_REGEX) || [];
+      for (const guid of matches) {
+        const normalized = normalizeGuidValue(guid);
+        if (!normalized) continue;
+        if (guidLookupCache.has(normalized) && guidLookupCache.get(normalized)) {
+          await setCurrentGuidTag(guidLookupCache.get(normalized));
+          return;
+        }
+        const tag = await findTagForGuid(normalized);
+        if (tag) {
+          await setCurrentGuidTag(tag);
+          return;
+        }
+      }
+    }
+
+    async function showEnvironmentVariables() {
+      envModalContent.innerHTML = '';
+      const envVars = extractEnvironmentVariables();
+      if (envVars.length === 0) {
+        envModalContent.textContent = 'No environment variables found in this flow.';
+      } else {
+        for (const env of envVars) {
+          const row = document.createElement('div');
+          row.className = 'info-row';
+
+          const label = document.createElement('span');
+          label.className = 'label';
+          const envValueForMatch = env.value ?? env.defaultValue ?? '';
+          const friendlyGuidMeta = envValueForMatch ? await resolveGuidMeta(envValueForMatch) : null;
+          label.textContent = env.name;
+          if (friendlyGuidMeta) {
+            label.title = friendlyGuidMeta.name;
+          }
+          row.appendChild(label);
+
+          let valueNode;
+          if (friendlyGuidMeta) {
+            const wrapper = document.createElement('span');
+            wrapper.className = 'env-highlight';
+            const rawValue = envValueForMatch || '—';
+            const guidSpan = document.createElement('span');
+            guidSpan.className = 'guid-highlight';
+            guidSpan.textContent = `${friendlyGuidMeta.name} (${rawValue})`;
+            wrapper.title = `${rawValue} → ${friendlyGuidMeta.name}`;
+            wrapper.appendChild(guidSpan);
+            valueNode = wrapper;
+          } else {
+            valueNode = createHighlightedValue(env.value ?? env.defaultValue ?? '—');
+          }
+          row.appendChild(valueNode);
+
+          envModalContent.appendChild(row);
+        }
+      }
+      envModal.classList.add('visible');
+    }
+
+    async function resolveGuidMeta(value) {
+      if (!value) return null;
+      const direct = findGuidMappingMatch(value);
+      if (direct) return direct;
+      const normalized = normalizeGuidValue(value);
+      if (!normalized) return null;
+      let tag = guidLookupCache.get(normalized);
+      if (!tag) {
+        tag = await findTagForGuid(normalized);
+      }
+      if (!tag) return null;
+      if (!guidMappings.has(tag) || guidMappings.get(tag)?.size === 0) {
+        await loadGuidMappingsForTag(tag);
+      }
+      const map = guidMappings.get(tag);
+      const meta = map?.get(normalized);
+      if (!meta) return null;
+      return { guid: meta.guid, name: meta.name };
+    }
+
+    function findGuidMetaSync(value) {
+      const normalized = normalizeGuidValue(value);
+      if (!normalized) return null;
+      const tagCandidates = [];
+      if (currentGuidTag) tagCandidates.push(currentGuidTag);
+      const cachedTag = guidLookupCache.get(normalized);
+      if (cachedTag) tagCandidates.unshift(cachedTag);
+      for (const tag of tagCandidates) {
+        const map = tag ? guidMappings.get(tag) : null;
+        if (map && map.has(normalized)) {
+          return map.get(normalized);
+        }
+      }
+      return null;
+    }
+
+    function buildEnvValueHtml(env, rawValue) {
+      const envLabel = env?.displayName || env?.name || env?.logicalName || env?.value || 'env';
+      const guidMeta = findGuidMetaSync(rawValue);
+      const title = guidMeta ? `${rawValue} → ${guidMeta.name}` : rawValue;
+      const valueHtml = guidMeta
+        ? `<span class="guid-highlight">${escapeHtml(`${guidMeta.name} (${rawValue})`)}</span>`
+        : escapeHtml(rawValue);
+      return `<span class="env-highlight" title="${escapeHtml(title)}">${escapeHtml(envLabel)}: ${valueHtml}</span>`;
+    }
+
+    function extractEnvironmentVariables() {
+      if (environmentVariables.length > 0) {
+        return environmentVariables;
+      }
+      const envEntities = flowData?.properties?.definition?.metadata?.environmentVariables || flowData?.properties?.definition?.environmentVariables || [];
+      if (Array.isArray(envEntities)) {
+        return envEntities.map(env => ({
+          name: env?.name || env?.displayName || env?.logicalName || 'Unnamed variable',
+          value: env?.value || env?.properties?.value || env?.currentValue || env?.defaultValue || null
+        }));
+      }
+      if (typeof envEntities === 'object') {
+        return Object.entries(envEntities).map(([name, value]) => ({
+          name,
+          value: value?.value || value?.properties?.value || value?.currentValue || value?.defaultValue || value
+        }));
+      }
+      return [];
+    }
+
+    function getCurrentSolutionIdFromFlowId(flowId) {
+      if (!flowId) return currentSolution;
+      const separatorIndex = flowId.indexOf('_');
+      if (separatorIndex === -1) return currentSolution;
+      return flowId.slice(0, separatorIndex);
+    }
+
+    function getEnvVarStorageKey(solutionId) {
+      return `env_vars_${solutionId}`;
+    }
+
+    function loadEnvironmentVariablesFromStorage(solutionId) {
+      const raw = localStorage.getItem(getEnvVarStorageKey(solutionId));
+      if (!raw) return [];
+      try {
+        return JSON.parse(raw);
+      } catch (err) {
+        console.warn('Failed to parse environment variables', err);
+        return [];
+      }
+    }
+
+    async function extractEnvironmentVariablesFromZip(zip) {
+      const envVars = [];
+      const parser = new DOMParser();
+      const envFiles = Object.keys(zip.files).filter(path => path.includes('environmentvariabledefinitions') && path.endsWith('environmentvariabledefinition.xml'));
+      for (const path of envFiles) {
+        try {
+          const xmlText = await zip.files[path].async('text');
+          const doc = parser.parseFromString(xmlText, 'application/xml');
+          const root = doc.querySelector('environmentvariabledefinition');
+          if (!root) continue;
+          const logicalName = root.getAttribute('schemaname') || 'unknown';
+          const displayName = root.querySelector('displayname')?.getAttribute('default') || logicalName;
+          const defaultValue = root.querySelector('defaultvalue')?.textContent?.trim() || '';
+          let resolvedValue = defaultValue;
+          const baseDir = path.substring(0, path.lastIndexOf('/'));
+          const valueFilePath = `${baseDir}/environmentvariablevalues.json`;
+          if (zip.files[valueFilePath]) {
+            try {
+              const jsonText = await zip.files[valueFilePath].async('text');
+              const jsonData = JSON.parse(jsonText);
+              const explicitValue = jsonData?.environmentvariablevalues?.environmentvariablevalue?.value;
+              if (explicitValue) {
+                resolvedValue = explicitValue;
+              }
+            } catch (err) {
+              console.warn('Failed to parse environment variable value file', valueFilePath, err);
+            }
+          }
+
+          envVars.push({
+            name: displayName,
+            logicalName,
+            value: resolvedValue,
+            defaultValue
+          });
+        } catch (err) {
+          console.warn('Failed to parse environment variable definition', path, err);
+        }
+      }
+      return envVars;
+    }
+
+    function buildInfoRow(label, value, customNode = null) {
+      const row = document.createElement('div');
+      row.className = 'info-row';
+
+      if (label) {
+        const labelEl = document.createElement('span');
+        labelEl.className = 'label';
+        labelEl.textContent = label;
+        row.appendChild(labelEl);
+      }
+
+      if (customNode) {
+        if (customNode instanceof Node) {
+          row.appendChild(customNode);
+        } else {
+          const fallback = document.createElement('span');
+          fallback.textContent = typeof customNode === 'string' ? customNode : String(customNode ?? '—');
+          row.appendChild(fallback);
+        }
+        return row;
+      }
+
+      const valueEl = document.createElement('span');
+      valueEl.textContent = value || '—';
+      row.appendChild(valueEl);
+      return row;
+    }
+
+    function createHighlightedValue(value) {
+      const container = document.createElement('span');
+      if (value === undefined || value === null || value === '') {
+        container.textContent = '—';
+        return container;
+      }
+      const str = String(value);
+      let guidMatch = findGuidMappingInText(str);
+      if (!guidMatch) {
+        const regexMatch = str.match(GUID_REGEX);
+        if (regexMatch && regexMatch.length) {
+          const normalized = normalizeGuidValue(regexMatch[0]);
+          const tag = cacheGuidTagLookup(normalized);
+          if (tag) {
+            const map = guidMappings.get(tag);
+            if (map) {
+              guidMatch = map.get(normalized);
+            }
+          }
+        }
+      }
+      if (guidMatch) {
+        const highlight = document.createElement('span');
+        highlight.className = 'guid-highlight';
+        highlight.textContent = `${guidMatch.name} (${guidMatch.guid})`;
+        highlight.title = guidMatch.guid;
+        container.appendChild(highlight);
+        return container;
+      }
+      const envMatch = findMatchingEnvironmentVariable(str);
+      if (envMatch) {
+        const highlight = document.createElement('span');
+        highlight.className = 'env-highlight';
+        const envValue = envMatch.value || envMatch.defaultValue || '';
+        const guidMeta = envValue ? findGuidMappingMatch(envValue) : null;
+        const nameText = envMatch.displayName || envMatch.name || envMatch.logicalName || envMatch.value;
+        highlight.textContent = nameText ? `${nameText}: ` : '';
+        if (envValue) {
+          if (guidMeta) {
+            const guidSpan = document.createElement('span');
+            guidSpan.className = 'guid-highlight';
+            guidSpan.textContent = `${guidMeta.name} (${envValue})`;
+            highlight.appendChild(guidSpan);
+            highlight.title = `${envValue} → ${guidMeta.name}`;
+          } else {
+            highlight.appendChild(document.createTextNode(envValue));
+            highlight.title = envValue;
+          }
+        } else {
+          highlight.title = str;
+        }
+        container.appendChild(highlight);
+        return container;
+      }
+      container.textContent = str;
+      return container;
+    }
+
+    function highlightJsonString(obj) {
+      let jsonString = JSON.stringify(obj, null, 2);
+      const replacements = [];
+
+      const addReplacement = (html) => {
+        const placeholder = `__PLACEHOLDER_${replacements.length}_${Math.random().toString(36).slice(2)}__`;
+        replacements.push({ placeholder, html });
+        return placeholder;
+      };
+
+      if (environmentVariables?.length) {
+        environmentVariables.forEach(env => {
+          const rawValue = env?.value ?? env?.defaultValue;
+          if (!rawValue) return;
+          const pattern = escapeRegExp(rawValue);
+          const regex = new RegExp(pattern, 'g');
+          jsonString = jsonString.replace(regex, () => addReplacement(buildEnvValueHtml(env, rawValue)));
+        });
+      }
+
+      jsonString = jsonString.replace(GUID_REGEX, (match) => {
+        const meta = findGuidMetaSync(match);
+        if (!meta) return match;
+        const html = `<span class="guid-highlight" title="${escapeHtml(match)}">${escapeHtml(`${meta.name} (${match})`)}</span>`;
+        return addReplacement(html);
+      });
+
+      let html = escapeHtml(jsonString);
+      replacements.forEach(({ placeholder, html: replacement }) => {
+        const escapedPlaceholder = escapeRegExp(placeholder);
+        const regex = new RegExp(escapedPlaceholder, 'g');
+        html = html.replace(regex, replacement);
+      });
+      return html;
+    }
+
+    function findMatchingEnvironmentVariable(input) {
+      if (!environmentVariables || environmentVariables.length === 0) return null;
+      const clean = String(input).trim();
+      if (!clean) return null;
+      return environmentVariables.find(env => env?.value && clean.includes(env.value));
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function escapeRegExp(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function resetLayoutToDefault() {
+      if (!flowData) return;
+      if (!confirm('Reset layout to default positions?')) return;
+      nodePositions.clear();
+      saveLayoutSnapshot({});
+      localStorage.removeItem(getLayoutStorageKey());
+      renderFlow();
+    }
+
+    async function snapNodeToGrid(nodeId) {
+      const node = nodes.find(n => n.id === nodeId);
+      const nodeEl = canvas.querySelector(`.node[data-id="${nodeId}"]`);
+      if (!node || !nodeEl) return;
+      const snapValue = (val, origin, step) => origin + Math.round((val - origin) / step) * step;
+      node.x = snapValue(node.x, START_X, HORIZONTAL_SPACING / 2);
+      node.y = snapValue(node.y, START_Y, VERTICAL_SPACING);
+      nodeEl.style.left = `${node.x}px`;
+      nodeEl.style.top = `${node.y}px`;
+      const gridCol = pixelToGridX(node.x);
+      const gridRow = pixelToGridY(node.y);
+      node.gridCol = gridCol;
+      node.gridRow = gridRow;
+      nodePositions.set(nodeId, { gridCol, gridRow });
+      await saveLayoutSnapshot();
+    }
   </script>
 </body>
 </html>
